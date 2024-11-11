@@ -1,6 +1,6 @@
 """
 Created by: Alex W
-Last edited: 27/10/24
+Created: 27/10/24
 
 Document Purpose: To take an image and process it to be used by the printer.
 
@@ -11,6 +11,8 @@ Two images will be produced.
 """
 import cv2
 import numpy as np
+from shapely.geometry import LineString, Polygon, MultiLineString
+from shapely.ops import unary_union
 
 # Image file name, located in 'images' folder.
 image_name = 'shocked_Pika.png'
@@ -19,26 +21,39 @@ image_name = 'shocked_Pika.png'
 def main():
     
     img_processor()
+    print('img_processor Status: SUCCESS')
 
     # Load the images
     edges_image = cv2.imread(f'./processed/edges_{image_name}', cv2.IMREAD_GRAYSCALE)
-    grey_image = cv2.imread(f'./processed/thresholded_grey_{image_name}', cv2.IMREAD_GRAYSCALE)
+    grey_image = cv2.imread(f'./processed/thresholded_grey_{image_name}', cv2.IMREAD_GRAYSCALE) #Dont think we need
 
     # Get contours for edges and greyscale images
     edge_contours = get_outline(edges_image)  # This will get the outer most edges (the images outline)
+    print('Outline Status: SUCCESS')
     inside_edges_contours = get_inside_contours(edges_image)
+    print('Detailing Edge Status: SUCCESS')
     # grey_contours = get_contours(grey_image)
 
     # Convert contours to paths for the printer
     edge_path = contours_to_paths(edge_contours)
+    print('contours_to_paths Status: SUCCESS')
     inside_paths = contours_to_paths(inside_edges_contours)
-    # grey_paths = contours_to_paths(grey_contours)
+    print('contours_to_paths Status: SUCCESS')
 
+    # Fill the image
+    fill_paths = generate_fill_paths(edge_path, inside_paths, spacing=5.0, angle=0, pattern="zigzag")
+    # Can inside paths have the edge path as well? cause currently it does
+    fill_paths = optimise_fill_paths(fill_paths, start_point=(0,0)) # Should we change starting point
+
+
+
+#### Testing visualiser
     # Draw paths on images for visualization
     output_image = cv2.cvtColor(edges_image, cv2.COLOR_GRAY2BGR)  # Convert to BGR for color display
 
     output_image = draw_paths(output_image, edge_path, color=(0, 0, 255))  # Draw edges in red (This is only needed as the outline for the printer)
     output_image = draw_paths(output_image, inside_paths, color=(0, 255, 0))   # Draws all contours
+    output_image = draw_paths(output_image, fill_paths, color=(255, 0, 0))   # Draws all contours
 
     # output_image = draw_paths(output_image, grey_paths, color=(0, 255, 0))   # Draw grey paths in green
 
@@ -47,6 +62,7 @@ def main():
     cv2.waitKey(0)  # Wait for keypress to close the window
     cv2.imwrite(f'./processed/final_paths_{image_name}', output_image)
 
+### IDK what this part is, dont think it works
     # Step 1: Create buffered mask around the outer contour
     buffered_mask = create_buffered_contour(grey_image, inside_edges_contours, buffer_size=10)
 
@@ -102,8 +118,6 @@ def img_processor():
     cv2.imshow('Thresholded Grey', thresholded_grey)
     cv2.waitKey(0)  # Wait until a key is pressed
 
-    print('SUCCESS')
-
 ####################################################################################################
 
 """
@@ -152,6 +166,7 @@ def get_inside_contours(image):
     contours, _ = cv2.findContours(image, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
     # Approximate contours to reduce point density (Smooths the lines)
     approx_contours = [cv2.approxPolyDP(cnt, epsilon=1.5, closed=True) for cnt in contours]
+
     return approx_contours
 
 def contours_to_paths(contours):
@@ -176,6 +191,7 @@ def contours_to_paths(contours):
                 pathtxt.write(f"{x} {y}\n")
             # Optionally, add a newline between contours to separate paths visually
             pathtxt.write("\n")
+    
     return paths
 
 # # Unsure if needed
@@ -189,6 +205,173 @@ def contours_to_paths(contours):
 #         print("New Path:")
 #         for x, y in path:
 #             print(f"Move to ({x}, {y})")
+####################################################################################################
+"""Fill object with paths"""
+
+def generate_fill_paths(outline_path, detail_paths, spacing=5.0, angle=0, pattern="zigzag"):
+    """
+    Generate fill paths for an object with outline and detail paths.
+    
+    Parameters:
+    outline_path: List of (x,y) points defining the outer boundary
+    detail_paths: List of Lists of (x,y) points defining internal details
+    spacing: Distance between fill lines
+    angle: Angle of fill lines in degrees
+    pattern: "lines" or "zigzag"
+    
+    Returns:
+    List of fill paths as (x,y) point pairs
+    """
+    # Convert the outline_path format for Shapely
+    # Unpack the (x,y) tuples into separate coordinates
+    outline_coords = [(x, y) for x, y in outline_path[0]]  # Note the [0] since outline_path is a list of path
+    # Make sure the polygon is closed (first and last points match)
+    if outline_coords[0] != outline_coords[-1]:
+        outline_coords.append(outline_coords[0])
+    # # Convert outline to Shapely polygon
+    # outline_polygon = Polygon(outline_path)
+        # Convert outline to Shapely polygon
+    try:
+        outline_polygon = Polygon(outline_coords)
+    except Exception as e:
+        print("Error creating polygon:", e)
+        print("Outline coordinates:", outline_coords)
+        return []
+    
+    # # Convert detail paths to Shapely linestrings
+    # detail_lines = [LineString(path) for path in detail_paths]
+    detail_lines = []
+    for detail_path in detail_paths:
+        try:
+            # Convert each detail path to correct format
+            detail_coords = [(x, y) for x, y in detail_path]
+            detail_lines.append(LineString(detail_coords))
+        except Exception as e:
+            print(f"Error creating detail line: {e}")
+            continue
+    
+    # Get bounding box
+    minx, miny, maxx, maxy = outline_polygon.bounds
+    
+    # Calculate rotated bounding box for angled lines
+    theta = np.radians(angle)
+    rot_matrix = np.array([[np.cos(theta), -np.sin(theta)],
+                          [np.sin(theta), np.cos(theta)]])
+    
+    # Generate parallel lines across the bounding box
+    line_segments = []
+    current_y = miny
+    
+    while current_y <= maxy:
+        # Create line at current_y
+        line_start = np.array([minx, current_y])
+        line_end = np.array([maxx, current_y])
+        
+        # Rotate line if angle specified
+        if angle != 0:
+            line_start = rot_matrix @ line_start
+            line_end = rot_matrix @ line_end
+        
+        line = LineString([tuple(line_start), tuple(line_end)])
+        
+        # Intersect with outline polygon
+        if line.intersects(outline_polygon):
+            intersection = line.intersection(outline_polygon)
+            
+            # Handle multiple intersection segments
+            if isinstance(intersection, MultiLineString):
+                segments = list(intersection.geoms)
+            else:
+                segments = [intersection]
+            
+            # For each segment, check if it intersects detail paths
+            for segment in segments:
+                valid_segment = True
+                for detail in detail_lines:
+                    if segment.intersects(detail):
+                        valid_segment = False
+                        break
+                
+                if valid_segment:
+                    line_segments.append(list(segment.coords))
+        
+        current_y += spacing
+
+    # Convert to zigzag pattern if requested
+    if pattern == "zigzag":
+        zigzag_paths = []
+        for i in range(0, len(line_segments) - 1, 2):
+            # Get current and next line segment
+            current_line = line_segments[i]
+            if i + 1 < len(line_segments):
+                next_line = line_segments[i + 1]
+                # Reverse every other line to create continuous path
+                next_line = next_line[::-1]
+                # Combine into single zigzag path
+                zigzag_path = current_line + next_line
+                zigzag_paths.append(zigzag_path)
+            else:
+                # Handle odd number of lines
+                zigzag_paths.append(current_line)
+        return zigzag_paths
+    
+    return line_segments
+
+def optimise_fill_paths(fill_paths, start_point=(0,0)):
+    """
+    Optimise the order of fill paths to minimize travel distance.
+    
+    Parameters:
+    fill_paths: List of fill paths
+    start_point: Starting point for optimisation
+    
+    Returns:
+    Optimised list of fill paths
+    """
+    if not fill_paths:
+        return []
+    
+    remaining_paths = fill_paths.copy()
+    optimised_paths = []
+    current_point = start_point
+    
+    while remaining_paths:
+        # Find closest path to current point
+        min_dist = float('inf')
+        closest_path = None
+        closest_path_idx = None
+        should_reverse = False
+        
+        for i, path in enumerate(remaining_paths):
+            # Check distance to path start
+            dist_to_start = np.sqrt((path[0][0] - current_point[0])**2 + 
+                                  (path[0][1] - current_point[1])**2)
+            if dist_to_start < min_dist:
+                min_dist = dist_to_start
+                closest_path = path
+                closest_path_idx = i
+                should_reverse = False
+            
+            # Check distance to path end
+            dist_to_end = np.sqrt((path[-1][0] - current_point[0])**2 + 
+                                (path[-1][1] - current_point[1])**2)
+            if dist_to_end < min_dist:
+                min_dist = dist_to_end
+                closest_path = path
+                closest_path_idx = i
+                should_reverse = True
+        
+        # Add closest path to optimized paths
+        if should_reverse:
+            closest_path = closest_path[::-1]
+        optimised_paths.append(closest_path)
+        current_point = closest_path[-1]
+        
+        # Remove path from remaining paths
+        remaining_paths.pop(closest_path_idx)
+    
+    return optimised_paths
+
 
 ####################################################################################################
 """ALL TESTING STUFF"""

@@ -43,6 +43,14 @@ def converter():
     with open(f'./paths/gcode_path_shocked_Pika.cnc', "w") as pathtxt:
         pathtxt.write('G21 G17 G90\n')  # G21-units(mm), G17-XY plane, G90-Absolute mode
         for i in range(len(lines)):
+            if i == 0:
+                next_line = lines[i + 1].strip()
+                x, y = next_line.split()
+                # Apply scaling and offset to fit within boundaries
+                x = (float(x) - min_x) * scale_factor
+                y = (float(y) - min_y) * scale_factor
+                pathtxt.write(f'G00 X{x:.2f} Y{y:.2f}\n')
+
             line = lines[i].strip()
 
             # If new paths reposition printer head
