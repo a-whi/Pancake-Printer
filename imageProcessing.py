@@ -15,8 +15,8 @@ from shapely.geometry import LineString, Polygon, MultiLineString
 from shapely.ops import unary_union
 
 # Image file name, located in 'images' folder.
-image_name = 'shocked_Pika.png'
-# image_name = 'me_outline.png'
+# image_name = 'shocked_Pika.png'
+image_name = 'square.jpg'
 
 def main():
     
@@ -25,14 +25,12 @@ def main():
 
     # Load the images
     edges_image = cv2.imread(f'./processed/edges_{image_name}', cv2.IMREAD_GRAYSCALE)
-    grey_image = cv2.imread(f'./processed/thresholded_grey_{image_name}', cv2.IMREAD_GRAYSCALE) #Dont think we need
 
     # Get contours for edges and greyscale images
     edge_contours = get_outline(edges_image)  # This will get the outer most edges (the images outline)
     print('Outline Status: SUCCESS')
     inside_edges_contours = get_inside_contours(edges_image)
     print('Detailing Edge Status: SUCCESS')
-    # grey_contours = get_contours(grey_image)
 
     # Convert contours to paths for the printer
     edge_path = contours_to_paths(edge_contours)
@@ -40,11 +38,28 @@ def main():
     inside_paths = contours_to_paths(inside_edges_contours)
     print('contours_to_paths Status: SUCCESS')
 
+######
+    output_image = cv2.cvtColor(edges_image, cv2.COLOR_GRAY2BGR)  # Convert to BGR for color display
+    output_image = draw_paths(output_image, edge_path, color=(0, 0, 255)) 
+    cv2.imshow('edge path', output_image)
+    cv2.waitKey(0)  # Wait for keypress to close the window
+
+    output_image = draw_paths(output_image, inside_paths, color=(0, 255, 0)) 
+    cv2.imshow('inside path', output_image)
+    cv2.waitKey(0)  # Wait for keypress to close the window
+#####
+
+    print('AAAAAAAAAA')
+    print(len(inside_paths))
+    print(len(inside_paths))
+
     # Fill the image
     fill_paths = generate_fill_paths(edge_path, inside_paths, spacing=5.0, angle=0, pattern="zigzag")
     # Can inside paths have the edge path as well? cause currently it does
     fill_paths = optimise_fill_paths(fill_paths, start_point=(0,0)) # Should we change starting point
 
+    cv2.imshow("Buffered Contour", fill_paths)
+    cv2.waitKey(0)
 
 
 #### Testing visualiser
@@ -62,18 +77,18 @@ def main():
     cv2.waitKey(0)  # Wait for keypress to close the window
     cv2.imwrite(f'./processed/final_paths_{image_name}', output_image)
 
-### IDK what this part is, dont think it works
-    # Step 1: Create buffered mask around the outer contour
-    buffered_mask = create_buffered_contour(grey_image, inside_edges_contours, buffer_size=10)
+# ### IDK what this part is, dont think it works
+#     # Step 1: Create buffered mask around the outer contour
+#     buffered_mask = create_buffered_contour(grey_image, inside_edges_contours, buffer_size=10)
 
-    # Step 2: Create fill paths within the buffered area
-    fill_paths = create_fill_paths(grey_image, buffered_mask, line_spacing=15)
+#     # Step 2: Create fill paths within the buffered area
+#     fill_paths = create_fill_paths(grey_image, buffered_mask, line_spacing=15)
 
-    # Display results
-    cv2.imshow("Buffered Contour", buffered_mask)
-    cv2.waitKey(0)
-    cv2.imshow("Fill Paths", fill_paths)
-    cv2.waitKey(0)
+#     # Display results
+#     cv2.imshow("Buffered Contour", buffered_mask)
+#     cv2.waitKey(0)
+#     cv2.imshow("Fill Paths", fill_paths)
+#     cv2.waitKey(0)
 
     cv2.destroyAllWindows()
 
@@ -100,14 +115,17 @@ def img_processor():
     # Convert BGR image to greyscale
     grey = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
 
-    # Pad the image to avoid detecting border as a contour
-    padded_image = cv2.copyMakeBorder(img, 10, 10, 10, 10, cv2.BORDER_CONSTANT, value=0)
+    # Pad the image for morphological closing, but crop it out before edge detection
+    padded_image = cv2.copyMakeBorder(grey, 10, 10, 10, 10, cv2.BORDER_CONSTANT, value=0)
     
     # Apply morphological closing with a larger kernel to close gaps
     kernel = np.ones((5, 5), np.uint8)
-    refined_edges = cv2.morphologyEx(padded_image, cv2.MORPH_CLOSE, kernel)
+    closed = cv2.morphologyEx(padded_image, cv2.MORPH_CLOSE, kernel)
 
-    edges = cv2.Canny(image=refined_edges, threshold1=100, threshold2=200)
+    # Remove the padding
+    refined_image = closed[10:-10, 10:-10]
+
+    edges = cv2.Canny(refined_image, threshold1=100, threshold2=200)
     cv2.imwrite(f'./processed/edges_{image_name}', edges)
     cv2.imshow('Refined_edges', edges)
     cv2.waitKey(0)  # Wait until a key is pressed
@@ -158,16 +176,44 @@ def get_outline(image):
 
     return [outline] 
 
+# def get_inside_contours(image):
+#     """
+#     Function finds all contours within the image.
+#     """
+#     # Use RETR_TREE to get all contours, including nested ones
+#     contours, _ = cv2.findContours(image, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+#     # Approximate contours to reduce point density (Smooths the lines)
+#     approx_contours = [cv2.approxPolyDP(cnt, epsilon=1.5, closed=True) for cnt in contours]
+
+#     return approx_contours
 def get_inside_contours(image):
     """
-    Function finds all contours within the image.
+    Function finds all contours within the image except the outermost contour.
     """
     # Use RETR_TREE to get all contours, including nested ones
     contours, _ = cv2.findContours(image, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
-    # Approximate contours to reduce point density (Smooths the lines)
-    approx_contours = [cv2.approxPolyDP(cnt, epsilon=1.5, closed=True) for cnt in contours]
+
+    # Get the image center
+    image_center = np.array([image.shape[1] / 2, image.shape[0] / 2])
+
+    # Find the outermost contour by identifying the contour with the maximum distance from the center
+    max_distance = 0
+    outermost_contour = None
+    for cnt in contours:
+        distances = [np.linalg.norm(point[0] - image_center) for point in cnt]
+        max_contour_distance = max(distances)
+        if max_contour_distance > max_distance:
+            max_distance = max_contour_distance
+            outermost_contour = cnt
+
+    # Filter out the outermost contour
+    inside_contours = [cnt for cnt in contours if cnt is not outermost_contour]
+
+    # Approximate contours to reduce point density (smooths the lines)
+    approx_contours = [cv2.approxPolyDP(cnt, epsilon=1.5, closed=True) for cnt in inside_contours]
 
     return approx_contours
+
 
 def contours_to_paths(contours):
     """
@@ -386,28 +432,28 @@ def draw_paths(image, paths, color=(0, 255, 0), thickness=2):
             cv2.line(image, start_point, end_point, color, thickness)
     return image
 
-def create_buffered_contour(grey_image, contours, buffer_size=10):
-    # Create a mask with the contour filled
-    contour_mask = np.zeros_like(grey_image)
-    cv2.drawContours(contour_mask, contours, -1, 255, thickness=cv2.FILLED)
+# def create_buffered_contour(grey_image, contours, buffer_size=10):
+#     # Create a mask with the contour filled
+#     contour_mask = np.zeros_like(grey_image)
+#     cv2.drawContours(contour_mask, contours, -1, 255, thickness=cv2.FILLED)
 
-    # Create a buffered zone around the contour using dilation
-    kernel = np.ones((buffer_size, buffer_size), np.uint8)
-    buffered_mask = cv2.dilate(contour_mask, kernel, iterations=1)
+#     # Create a buffered zone around the contour using dilation
+#     kernel = np.ones((buffer_size, buffer_size), np.uint8)
+#     buffered_mask = cv2.dilate(contour_mask, kernel, iterations=1)
 
-    return buffered_mask
+#     return buffered_mask
 
-def create_fill_paths(image, buffered_mask, line_spacing=15):
-    # Mask where filling can occur (inside the outer contour, minus the buffered zone)
-    fill_area = cv2.bitwise_and(buffered_mask, buffered_mask, mask=255 - buffered_mask)
+# def create_fill_paths(image, buffered_mask, line_spacing=15):
+#     # Mask where filling can occur (inside the outer contour, minus the buffered zone)
+#     fill_area = cv2.bitwise_and(buffered_mask, buffered_mask, mask=255 - buffered_mask)
 
-    # Create spaced lines within the fill area
-    fill_image = np.zeros_like(image)
-    for y in range(0, fill_image.shape[0], line_spacing):
-        for x in range(fill_image.shape[1]):
-            if fill_area[y, x] == 255:  # If within the allowed fill area
-                fill_image[y, x] = (255, 255, 255)  # Mark path line
-    return fill_image
+#     # Create spaced lines within the fill area
+#     fill_image = np.zeros_like(image)
+#     for y in range(0, fill_image.shape[0], line_spacing):
+#         for x in range(fill_image.shape[1]):
+#             if fill_area[y, x] == 255:  # If within the allowed fill area
+#                 fill_image[y, x] = (255, 255, 255)  # Mark path line
+#     return fill_image
 
 
 main()
