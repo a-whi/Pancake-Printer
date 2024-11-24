@@ -38,6 +38,10 @@ def main():
     inside_paths = contours_to_paths(inside_edges_contours)
     print('contours_to_paths Status: SUCCESS')
 
+
+    print(edge_path)
+    print('AAAAAAAAAAA')
+    print(inside_paths)
 ######
     output_image = cv2.cvtColor(edges_image, cv2.COLOR_GRAY2BGR)  # Convert to BGR for color display
     output_image = draw_paths(output_image, edge_path, color=(0, 0, 255)) 
@@ -49,33 +53,33 @@ def main():
     cv2.waitKey(0)  # Wait for keypress to close the window
 #####
 
-    print('AAAAAAAAAA')
-    print(len(inside_paths))
-    print(len(inside_paths))
+    # print('AAAAAAAAAA')
+    # print(len(inside_paths))
+    # print(len(inside_paths))
 
-    # Fill the image
-    fill_paths = generate_fill_paths(edge_path, inside_paths, spacing=5.0, angle=0, pattern="zigzag")
-    # Can inside paths have the edge path as well? cause currently it does
-    fill_paths = optimise_fill_paths(fill_paths, start_point=(0,0)) # Should we change starting point
+    # # Fill the image
+    # fill_paths = generate_fill_paths(edge_path, inside_paths, spacing=5.0, angle=0, pattern="zigzag")
+    # # Can inside paths have the edge path as well? cause currently it does
+    # fill_paths = optimise_fill_paths(fill_paths, start_point=(0,0)) # Should we change starting point
 
-    cv2.imshow("Buffered Contour", fill_paths)
-    cv2.waitKey(0)
+    # cv2.imshow("Buffered Contour", fill_paths)
+    # cv2.waitKey(0)
 
 
 #### Testing visualiser
-    # Draw paths on images for visualization
-    output_image = cv2.cvtColor(edges_image, cv2.COLOR_GRAY2BGR)  # Convert to BGR for color display
+    # # Draw paths on images for visualization
+    # output_image = cv2.cvtColor(edges_image, cv2.COLOR_GRAY2BGR)  # Convert to BGR for color display
 
-    output_image = draw_paths(output_image, edge_path, color=(0, 0, 255))  # Draw edges in red (This is only needed as the outline for the printer)
-    output_image = draw_paths(output_image, inside_paths, color=(0, 255, 0))   # Draws all contours
-    output_image = draw_paths(output_image, fill_paths, color=(255, 0, 0))   # Draws all contours
+    # output_image = draw_paths(output_image, edge_path, color=(0, 0, 255))  # Draw edges in red (This is only needed as the outline for the printer)
+    # output_image = draw_paths(output_image, inside_paths, color=(0, 255, 0))   # Draws all contours
+    # output_image = draw_paths(output_image, fill_paths, color=(255, 0, 0))   # Draws all contours
 
-    # output_image = draw_paths(output_image, grey_paths, color=(0, 255, 0))   # Draw grey paths in green
+    # # output_image = draw_paths(output_image, grey_paths, color=(0, 255, 0))   # Draw grey paths in green
 
-    # Display and save the final image with drawn paths
-    cv2.imshow('Paths Drawn', output_image)
-    cv2.waitKey(0)  # Wait for keypress to close the window
-    cv2.imwrite(f'./processed/final_paths_{image_name}', output_image)
+    # # Display and save the final image with drawn paths
+    # cv2.imshow('Paths Drawn', output_image)
+    # cv2.waitKey(0)  # Wait for keypress to close the window
+    # cv2.imwrite(f'./processed/final_paths_{image_name}', output_image)
 
 # ### IDK what this part is, dont think it works
 #     # Step 1: Create buffered mask around the outer contour
